@@ -1,0 +1,108 @@
+---
+title: "Chapter 10 Part 2"
+author: "Sean McMannamy"
+date: "10/1/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(factoextra)
+library(cluster)
+library(fpc)
+library(dplyr)
+```
+
+## Data Set
+Use the diamonds data set within the ggplot2/tidyverse package and perform k-means, k-mediods, CLARA, BIRCH, CHAMELEON, and DBSCAN clustering. Do not use the price variable in your clustering. Once you have completed each clustering determine the mean and standard deviation of the price for each cluster. You must then determine which technique was the most useful for this situation and why that is.
+
+```{r}
+df <- diamonds
+```
+
+## Determining K
+
+```{r}
+head(df)
+df_e <- df[,-7]
+df_e$cut <- as.numeric(df$cut)
+df_e$color <- as.numeric(df$color)
+df_e$clarity <- as.numeric(df$clarity)
+
+set.seed(55)
+k.max <- 10
+wss <- sapply(1:k.max,
+              function(k) (kmeans(df_e, k, nstart=50, iter.max = 15)$tot.withinss))
+plot(1:k.max, wss, xlab="clusters", ylab="wss")
+df_e <- scale(df_e)
+```
+
+## K means
+
+```{r}
+k3 <- kmeans(df_e, centers = 3, nstart = 25)
+
+df$cluster <- k3$cluster
+mean_price <- df %>%
+  group_by(cluster) %>%
+  summarise(mean(price))
+mean_price
+sd_price <- df %>%
+  group_by(cluster) %>%
+  summarise(sd(price))
+sd_price
+# fviz_cluster(k3, data = df)
+```
+
+## K Medoids
+
+```{r}
+kmed <- pam(df_e, k = 3)
+
+df$cluster <- kmed
+mean_price <- df %>%
+  group_by(cluster) %>%
+  summarise(mean(price))
+mean_price
+sd_price <- df %>%
+  group_by(cluster) %>%
+  summarise(sd(price))
+sd_price
+# fviz_cluster(kmed, data = df)
+```
+
+## CLARA
+
+```{r}
+clara <- clara(df_e, 3, metric = "euclidean", stand = FALSE, 
+               samples = 5, pamLike = FALSE)
+
+df$cluster <- clara
+mean_price <- df %>%
+  group_by(cluster) %>%
+  summarise(mean(price))
+mean_price
+sd_price <- df %>%
+  group_by(cluster) %>%
+  summarise(sd(price))
+sd_price
+```
+
+## DBSCAN
+
+```{r}
+dbscan <- dbscan(df_e, eps = 0.45, MinPts = 5)
+
+df$cluster <- dbscan
+mean_price <- df %>%
+  group_by(cluster) %>%
+  summarise(mean(price))
+mean_price
+sd_price <- df %>%
+  group_by(cluster) %>%
+  summarise(sd(price))
+sd_price
+```
+
+I believe using DBSCAN is the most useful technique in this situation because the data points are mostly in a highly concentrated part of the plot together. There is a high level of density. This algorithm is able to deal with this appropriately and still provide a useful clustering of the data.

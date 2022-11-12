@@ -1,0 +1,150 @@
+---
+title: "Association Rules"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(arules)
+library(rCBA)
+
+df <- data.frame(x1 = character(),
+                 x2 = character(),
+                 x3 = character(),
+                 x4 = character(),
+                 x5 = character(),
+                 x6 = character())
+
+v1 <- c("M", "O", "N", "K", "E", "Y")
+v2 <- c("D", "O", "N", "K", "E", "Y")
+v3 <- c("M", "A", "K", "E", "", "")
+v4 <- c("M", "U", "C", "K", "Y", "")
+v5 <- c("C", "O", "O", "K", "I", "E")
+
+df[1,] <- v1
+df[2,] <- v2
+df[3,] <- v3
+df[4,] <- v4
+df[5,] <- v5
+
+```
+1. Give a short example to show that items in a strong association rule actually may be negatively correlated.
+
+If we look at items that are frequently NOT bought together, we can find a strong association rule with
+negatively correlated items. For example, if a store looked at their data and discovered that popsicles
+and chicken thighs were consistently not bought together, they may be negatively correlated.
+
+
+2. Most frequent pattern mining algorithms consider only distinct items in a transaction. However, multiple occurrences of an item in the same shopping basket, such as four cakes and three jugs of milk, can be important in transactional data analysis. How can one mine frequent itemsets efficiently considering multiple occurrences of items? Propose some modifications of the techniques covered in this chapter to cover these situations.
+
+This can be done by adding a weighted value to the observations that have more than one occurrence. Or
+construct your mining algorithms to look for specifically observations with multiple occurrences.
+
+
+3. A database has five transactions. Let min_sup=60% and min_conf=80%.
+* T100 = {M,O,N,K,E,Y}
+* T200  {D,O,N,K,E,Y}
+* T300 = {M,A,K,E}
+* T400 = {M,U,C,K,Y}
+* T500 = {C,O,O,K,I,E}
+a. Find all frequent itemsets using Apriori and FP-growth. Compare the efficiency of the two mining processes
+```{r, warning=FALSE}
+rules <- apriori(df, parameter=list(supp=0.6, conf=0.8))
+inspect(rules)
+
+#rules1 <- fpgrowth(df, support=0.6, confidence=0.8)
+#inspect(rules1)
+```
+b. List all of the strong association rules (with support s and confidence c) matching the following metarules, where X is a variable representing customers, and item, denotes variables representing items.
+
+$$
+\forall x\in transaction, buys(X,item_1)\land buys(X,item_2)\Rightarrow buys(X,item_3)\hspace{.2in} [s,c]
+$$
+$$
+buys(X, A) \land buys(X, D) \Rightarrow buys(X, B) [75,100]
+$$
+$$
+buys(X, B) \land buys(X, D) \Rightarrow buys(X, A) [75, 100]
+$$
+## Mushrooms
+The mushroom dataset includes descriptions of hypothetical samples corresponding to 23 species of gilled mushrooms .
+A csv file with 8,124 observations on 23 categorical variables:
+
+ 1. class: edible=e, poisonous=p
+ 2. cap-shape: bell=b,conical=c,convex=x,flat=f,knobbed=k,sunken=s
+ 3. cap-surface: fibrous=f,grooves=g,scaly=y,smooth=s
+ 4. cap-color: brown=n,buff=b,cinnamon=c,gray=g,green=r,pink=p,purple=u,red=e,white=w,yellow=y
+ 5. bruises?: bruises=t,no=f
+ 6. odor: almond=a,anise=l,creosote=c,fishy=y,foul=f,musty=m,none=n,pungent=p,spicy=s
+ 7. gill-attachment: attached=a,descending=d,free=f,notched=n
+ 8. gill-spacing: close=c,crowded=w,distant=d
+ 9. gill-size: broad=b,narrow=n
+ 10. gill-color: black=k,brown=n,buff=b,chocolate=h,gray=g,green=r,orange=o,pink=p,purple=u,red=e, white=w,yellow=y
+ 11. stalk-shape: enlarging=e,tapering=t
+ 12. stalk-root: bulbous=b,club=c,cup=u,equal=e,rhizomorphs=z,rooted=r,missing=?
+ 13. stalk-surface-above-ring: fibrous=f,scaly=y,silky=k,smooth=s
+ 14. stalk-surface-below-ring: fibrous=f,scaly=y,silky=k,smooth=s
+ 15. stalk-color-above-ring: brown=n,buff=b,cinnamon=c,gray=g,orange=o,pink=p,red=e,white=w,yellow=y
+ 16. stalk-color-below-ring: brown=n,buff=b,cinnamon=c,gray=g,orange=o,pink=p,red=e,white=w,yellow=y
+ 17. veil-type: partial=p,universal=u
+ 18. veil-color: brown=n,orange=o,white=w,yellow=y
+ 19. ring-number: none=n,one=o,two=t
+ 20. ring-type: cobwebby=c,evanescent=e,flaring=f,large=l,none=n,pendant=p,sheathing=s,zone=z
+ 21. spore-print-color: black=k,brown=n,buff=b,chocolate=h,green=r,orange=o,purple=u,white=w,yellow=y
+ 22. population: abundant=a,clustered=c,numerous=n,scattered=s,several=v,solitary=y
+ 23. habitat: grasses=g,leaves=l,meadows=m,paths=p,urban=u,waste=w,woods=d
+
+```{r mushrooms,warning=FALSE}
+# Reading the url for the mushroom dataset
+url <- "http://archive.ics.uci.edu/ml/machine-learning-databases/mushroom/agaricus-lepiota.data"
+
+# Reading in the Mushroom dataset
+mushrooms <- read.csv(file = url, header = FALSE)
+
+# Naming the columns in the dataset
+names(mushrooms) <- c("class", "cap-shape", "cap-surface",
+"cap-color", "bruises", "odor", "gill-attachment", "gill-spacing",
+"gill-size", "gill-color", "stalk-shape", "stalk-root",
+"stalk-surface-above-ring", "stalk-surface-below-ring",
+"stalk-color-above-ring", "stalk-color-below-ring",
+"veil-type", "veil-color", "ring-number", "ring-type",
+"spore-print-color", "population", "habitat")
+```
+
+From the mushroom data, find association rules that can be used to identify the edibility of a mushroom
+
+Think about parameters: length of rules, minimum support,minimum confidence
+
+## Questions
+4. How to find only rules relevant to edibility?
+Focus our association rule mining on the Class variable, specifically the edible value. We'll be able to 
+tell how to identify edibility by seeing what other variables are associated with edibility.
+5. Which interesting measures to use?
+We can use apriori or FP growth to mine for rules.
+6. Any redundant rules? How to remove them?
+We can remove them by seeing if there are super rules of other rules. This usually means they are redundant.
+7. What are characteristics of edible mushrooms? And characteristics of poisonous ones?
+We can tell by observing the gill-color, cap-color, ring-type, etc.
+```{r,warning=FALSE,message=FALSE}
+# find association rules from the mushroom dataset
+#install.packages("magrittr")
+library(magrittr)
+
+mrules <- apriori(mushrooms, parameter=list(supp=0.6, conf=0.8))
+#mrules <- apriori(mushrooms, parameter=list(supp=0.6, conf=0.8),
+                  #rhs=c("class=e", "class=p"))
+mrules <- sort(mrules, by="lift")
+subset.matrix <- is.subset(mrules, mrules)
+subset.matrix[lower.tri(subset.matrix, diag=T)] <- NA
+red <- colSums(subset.matrix, na.rm=T) >= 1
+#which(red)
+mrules.pruned <- mrules[!red]
+inspect(mrules.pruned)
+inspect(mrules)
+```
+
+
+
+Citation:
+Yanchang Zhao. R and Data Mining: Examples and Case Studies. ISBN 978-0-12-396963-7, December 2012. Academic Press, Elsevier. 256 pages. URL: http://www.rdatamining.com/docs/RDataMining-book.pdf.

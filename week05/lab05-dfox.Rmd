@@ -1,0 +1,345 @@
+---
+title: "Lab 16 Clustering"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Clustering
+# 1. k-Means Clustering
+PCA helped us visualize and identify patterns in data containing many variables, by grouping redundant variables together. Clustering is a general term for unsupervised methods that group observations together based upon similarity. One of the most popular approaches is **k-means clustering**, which groups observations into $k$ groups with minimum within cluster variation. While there are many k-means variations and algorithms, the original method minimizes:
+
+$$ \sum_{j=1}^k W(C_j)=\sum_{j=1}^k\sum_{x_i\in C_j}(x_i-\mu_j)^2 $$
+
+•	$W(C_k)$ is the “withiness” of cluster $k$
+
+•	$x_i$ is a data point belonging to cluster $k$
+
+•	$\mu_k$ is the mean of cluster $k$
+
+The kmeans function is used to perform $k$-means clustering. In this example we group the USArrests data into two clusters:
+
+```{r message=FALSE, warning=FALSE}
+set.seed(456)
+k2 <- kmeans(USArrests, centers = 2, nstart = 25)
+```
+The centers argument describes the number of clusters we want, while the nstart argument describes a starting point for the algorithm. (Here it was specified for precise reproducibility, different starting points typically have minimal impact on the results)
+
+We can visualize these clusters using fviz_cluster, which shows the clusters (which are by default created using all columns of USArrests) using the first two principle components to define the X-Y coordinates of each observation.
+```{r message=FALSE, warning=FALSE}
+library(factoextra)
+fviz_cluster(k2, data = USArrests)
+```
+ 
+Alternatively, we could display the clusters using two of the original variables:
+```{r message=FALSE, warning=FALSE}
+fviz_cluster(k2, data = USArrests, choose.vars = c("UrbanPop", "Murder"))
+```
+
+ 
+Since the variables in USArrests are on different scales, we should consider standardizing the data first using scale:
+```{r message=FALSE, warning=FALSE}
+Std_USArrests <- scale(USArrests)
+ks <- kmeans(Std_USArrests, centers = 4)
+fviz_cluster(ks, data = Std_USArrests, choose.vars = c("UrbanPop", "Murder"))
+```
+
+ 
+# 2. How Many Clusters?
+Choosing the right number of clusters can be tricky. While it should at least in part be based upon the expert opinion of the analyst, several methods exist to help guide the decision. We will briefly cover three popular strategies:
+
+1.	The Elbow Method
+
+2.	The Silhouette Method
+
+3.	The Gap Statistic
+
+### The Elbow Method
+
+Recall that the k-means algorithm minimizes total “withiness” or $\sum_{j=1}^kW(C_j)=\sum_{j=1}^k\sum_{x_i\in C_j}(x_i-\mu_j)^2$. This quantity will always decrease as more clusters are used, but at a certain point allowing more clusters doesn’t lead to much improvement in withiness.
+
+We can visualize the reduction in withiness or “wss” by the number of clusters used via the fviz_nbclust function:
+```{r message=FALSE, warning=FALSE}
+fviz_nbclust(USArrests, kmeans, method = "wss", k.max = 8)
+```
+
+ 
+The Elbow Method suggests the optimal number of clusters where the plot appears to bend. In the USArrests example, either 2 or 3 clusters would be reasonable choices and additional clusters appear to offer little added benefit in terms of “withiness”.
+
+### The Silhouette Method
+
+The Silhouette Method measures how well each member fits within its cluster by calculating its silhouette value. The silhouette value is a measure of how similar an observation is to its assigned cluster (cohesion) compared to the other clusters (separation). These values range from -1 (poor match within its assigned cluster) to +1 (perfect match within its assigned cluster). Thus, silhouettes can be used to assess individual observations, or the average silhouette can be used to assess the choice of $k$.
+```{r message=FALSE, warning=FALSE}
+fviz_nbclust(USArrests, kmeans, method = "silhouette", k.max = 8)
+```
+
+ 
+The average silhouette metric suggests that using 2 clusters is optimal for the USArrests data. We can also use silhouettes to assess individual observations:
+```{r message=FALSE, warning=FALSE}
+library(cluster)
+set.seed(123)
+k2 <- kmeans(USArrests, centers = 2, nstart = 25)
+sil <- silhouette(k2$cluster, dist(USArrests), ordered = FALSE)
+row.names(sil) <- row.names(USArrests) # Needed to use label option
+fviz_silhouette(sil, label = TRUE)
+```
+
+
+We see that Missouri and Arkansas are the poorest fits within their assigned clusters. We might want to take this into consider when interpreting the results for those states.
+
+### The Gap Statistic
+
+Gap statistic compares the withiness that is achieved by a certain choice of k with what would be expected for that kk. The code below compares $k=1$ through $k=8$
+```{r message=FALSE, warning=FALSE}
+fviz_nbclust(USArrests, kmeans, method = "gap", k.max = 8)
+```
+
+ 
+By default, fviz_nbclust will suggest the smallest kk with a gap statistic within one standard error of the maximum. This practice encourages smaller numbers of clusters.
+
+## 3. Applications
+
+### Application #1 - Customer Segmentation
+
+The OnlineRetail dataset contains over 500,000 transactions from a UK-based retailer occurring between 1/12/2010 and 9/12/2011. For details on the data see their UC-Irvine machine learning repository documentation.
+```{r message=FALSE, warning=FALSE}
+data <- read.csv("data/OnlineRetail.csv")
+## This takes a long time, the data contain >500k records
+```
+ 
+The goal of this application will be to perform an RFM (Recency, Frequency, and Monetary value) customer segmentation analysis. The idea is to group the customers into clusters using the RFM variables, and then use the clusters to evaluate customer value and guide marketing efforts.
+
+For this application we will restrict the data to records with complete information:
+```{r message=FALSE, warning=FALSE}
+data <- data[complete.cases(data),]
+```
+
+To perform the analysis, we’ll need to derive Recency, Frequency, and Monetary value variables ourselves. The most difficult is Recency, which we will choose to define as the number of days since the customer’s most recent purchase. This requires some knowledge of date variables, so the code to create this variable, along with a few comments is provided:
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+dates <- as.Date(substr(data$InvoiceDate,1,10), "%m/%d/%Y") ## Extract only the date, specifying its format
+data$days_since <-  as.Date("2011-12-10") - dates ## Subtract from a reference date
+## Keep only the minimum per customer
+Rec <- data %>% group_by(CustomerID) %>% summarise(min =min(days_since))
+```
+
+We now need create the Frequency variable, which we will define as the number of purchases a customer made during the span of these data.
+
+**Question 1:** Use the appropriate data wrangling functions to create an object named Freq which contains the number of purchases by each customer. (Hint: the object should be contain 4372 observations)
+
+```{r}
+head(data)
+Freq <- data %>% group_by(CustomerID) %>% summarise(n_purchases = n())
+Freq
+```
+
+Next we need to create a Monetary value variable, which we will define as the total purchase amount spent by a customer during the span of these data.
+
+**Question 2:** Use the appropriate data wrangling functions to create a vector named Mon which contains the total purchased amount by each customer. (Hint: this object should contain 4372 observations)
+
+```{r}
+Mon <- data %>% group_by(CustomerID) %>% summarise(total_amt = sum(UnitPrice))
+Mon
+```
+
+Finally, we should assemble these objects to create a new data.frame with one row per customer and three variables (Rec, Freq, and Mon)
+
+**Question 3:** Write code that create a new data.frame named CD with one row per customer, containing the three variables (Rec, Freq, and Mon) corresponding to that customer.
+
+```{r}
+CD <- Rec %>% 
+    inner_join(Freq, by="CustomerID") %>%
+    inner_join(Mon, by="CustomerID") %>%
+    rename(
+        Rec = min,
+        Freq = n_purchases,
+        Mon = total_amt
+    )
+CD
+```
+
+At this point we’re almost ready for clustering, but should consider the distributions of our variables the impact they might have on our clusters.
+
+**Question 4:** Write code that creates the following set of boxplots shown below. To prove that it is your own, add the title “RFM Variable Distributions”.
+
+```{r}
+boxplot(CD$Freq, CD$Mon, CD$Rec, xlab="RFM Variable Distributions")
+```
+ 
+Based on the extreme right skew (and large number of outliers) we might want to consider applying a log transformation to Freq and Mon. To accomplish this we’ll need to remove customers with negative Monetary values. These are customers that have returned items and not made up for their returns in new purchases, so they arguably don’t belong in this analysis and could be considered separate cluster by themselves.
+
+```{r message=FALSE, warning=FALSE}
+CD <- filter(CD, Mon > 0)
+CD$Mon <- log10(CD$Mon)
+CD$Freq <- log10(CD$Freq)
+```
+
+**Question 5:** Using the newly transformed data, perform kk-means clustering. Be sure to standardize the data before doing so (notice the difference scales of Rec and Mon for example). In your analysis, select an optimal number of clusters using one of the methods we’ve covered. Then visualize your clusters using three different scatter plots (showing the three unique pairings of variables). Write a short description of the trends you see (thinking specifically about customer groups).
+
+```{r}
+head(CD)
+CD$Rec <- as.numeric(CD$Rec)
+CD.scaled <- scale(CD[, -1])
+fviz_nbclust(CD.scaled, kmeans, method = "wss", k.max = 8)
+
+k2 <- kmeans(CD.scaled, centers = 3, nstart = 25)
+fviz_cluster(k2, data = CD.scaled, choose.vars = c("Freq", "Mon"))
+fviz_cluster(k2, data = CD.scaled, choose.vars = c("Mon", "Rec"))
+fviz_cluster(k2, data = CD.scaled, choose.vars = c("Freq", "Rec"))
+```
+
+### Application #2 - Evaluating Rural-Urban-Suburban Designations
+
+The midwest data in the ggplot2 package contains demographic information for 437 Midwest counties. To see more infromation on the data, you can type ?midwest into the R console. Very often counties are categorized into “urban”, “rural”, and “suburban” to aid in statistical analyses; but do these designations adequately and accurately describe meaningful differences between counties? To address this question, we will cluster counties using important demographic variables and gauge how well these clusters reflect the traditional “urban”, “rural”, and “suburban” designations.
+```{r message=FALSE, warning=FALSE}
+data("midwest")
+## Restrict the variables used in the clustering
+midwest2 <- select(midwest, county, state, popdensity, 
+                   percwhite, percblack, percasian, perchsd, 
+                   percollege, percprof, percchildbelowpovert, 
+                   percadultpoverty, percelderlypoverty)
+head(midwest2)
+```
+
+**Question #1:** If we don’t rescale the data, popdensity will be a much larger contributor than any of the other variables (which are all percentages bounded between zero and one). For this question (along with the next two), do not rescale any of the variables. Use the elbow method, the silhouette method, and the gap statistic to evaluate the optimal number of clusters for the unscaled data. Does using 3 clusters seem reasonable?
+
+```{r}
+# elbow
+fviz_nbclust(midwest2[,c(-1,-2)], kmeans, method = "wss", k.max = 8)
+ 
+# silhouette
+fviz_nbclust(midwest2[,c(-1,-2)], kmeans, method = "silhouette", k.max = 8)
+ 
+# gap
+fviz_nbclust(midwest2[,c(-1,-2)], kmeans, method = "gap", k.max = 8)
+```
+
+**Question #2:** The five largest cities contained in these data are Chicago (Cook County IL), Cleveland (Cuyahoga County OH), Detroit (Wayne County MI), Milwaukee (Milwaukee County WI), and Indianapolis (Marion County IN). Apply $k$-means clustering with $k=3$ to the unscaled data, does one of the three clusters appear to describe these urban centers?
+
+```{r}
+k2 <- kmeans(midwest2[,c(-1,-2)], centers = 3, nstart = 25)
+fviz_cluster(k2, data = midwest2[,c(-1,-2)])
+```
+
+**Question #3:** Again using $k$-means clustering with $k=3$ on the unscaled data, does the smaller of the two remaining clusters appear to describe suburban counties? If you aren’t familiar with the geography of the Midwest, try googling a few of the counties you see in this cluster to gauge their proximity to large cities mentioned in the prior question.
+For the next set of questions I’d like you to rescale midwest2 using the scale function.
+
+Yes, the the smaller of the two remaining clusters appear to describe suburban counties.
+
+**Question #4:** Using the scaled data, assess whether using 3 clusters seems reasonable. Briefly describe your thoughts.
+
+```{r}
+df.scaled <- scale(midwest2[,c(-1,-2)])
+k2 <- kmeans(df.scaled, centers = 3, nstart = 25)
+fviz_cluster(k2, data = df.scaled)
+```
+
+**Question #5:** Using $k$-means clustering with $k = 3$ on the scaled data, do these clusters appear to correspond with “rural”, “urban”, and “suburban”? (Hint: start by locating the same large cities mentioned earlier)
+
+Yes, they do appear to correspond with "rural", "urban", and "suburban".
+
+**Question #6:** Based upon what you’ve seen so far in this application, do you prefer the original or scaled approach? Briefly provide an argument in support of each approach.
+
+I prefer the scaled approach because it accounts for the properties that can skew the data. On the other side, the original data does not have any transformation so it represents the true data.
+
+### Application #3 - Geography of Plant Species
+
+For this application we will cluster data from the USDA plants database. The original data contain over 30,000 plant species, along with locations where the plants can be found in North America. To reduce the time it takes for code to run in this application, we will use a randomly selected subset of 1,000 plants. Our goal will be to cluster the plants based upon their location information.
+
+In this application, the raw data are formatted to contain the plant name followed by a list of locations. This structure does not clearly define columns, so our analysis will require considerable data wrangling. I encourage you to go through the data wrangling steps shown below, handling this sort of data is common to many types of clustering problems (with another example being internet user website navigation).
+```{r message=FALSE, warning=FALSE}
+## Location of the raw data
+file <- "data/plants.data"
+
+## Get the number of variables (the number of unique fields)
+no_col <- max(count.fields(file, sep = ","))
+plants <- read.table(file,sep=",",fill=TRUE,header = F,col.names=c(1:no_col))
+
+## To make this more manageable we'll use 1000 randomly selected rows
+set.seed(123)
+random_sample <- sample(1:nrow(plants), size = 1000)
+plants <- plants[random_sample,]
+
+names <- plants$X1 ## Extract the plant names
+placeholder<-factor(unlist(plants[,2:no_col]))
+locations <- levels(placeholder) ## Extract unique locations
+locations <- locations[-which(locations == "")] ## Remove the empty locations
+
+## Set up an empty X matrix to be filled
+X <- matrix(0, nrow = nrow(plants), ncol = length(locations)) 
+colnames(X) <- as.character(locations) ## Name its variables
+
+## Fill the X matrix with 1s where appropriate (location is present for that species)
+## Warning: looping tends to be slow in R
+for(i in 1:nrow(X)) {
+    X[i,] <- as.numeric(colnames(X) %in% as.character(unlist(plants[i,-1])))
+}
+
+## Code each column as a binary factor variable
+#XF <- as.data.frame(apply(X,2, as.factor))
+
+```
+
+The daisy function in the cluster package can be used to calculate Gower distance by specifying metric = "gower".
+```{r message=FALSE, warning=FALSE}
+D <- daisy(X, metric = "gower")
+```
+
+The code below applies PAM clustering with $k=10$, checks the average silhouette width of these clusters, and prints some other potentially useful information.
+```{r message=FALSE, warning=FALSE}
+pm <- pam(D, k = 10) ## Apply pam clustering with k = 10
+pm$silinfo$avg.width  ## Average silhouette width
+pm$clusinfo ## Summarizes the cluster sizes
+colMeans(X[pm$clustering == 10,]) ## Used to interpret the cluster
+```
+
+From this information, we see can judge that the 10th cluster contains plants which tend to be present in primarily Plains and Rocky Mountain States (Colorado, Alberta, Kansas, Montana, Wyoming, North Dakota, Nebraska, etc.)
+
+**Question #1:** Using the distance matrix D from the earlier code, analyze the plants data using PAM clustering. You should justify the number of clusters you choose. Choose one of these clusters to interpret.
+
+```{r}
+pm2 <- pam(D, k = 5)
+```
+
+The code below applies hierarchical clustering to the plants data using the distance matrix D:
+```{r}
+hc <- hclust(D)
+
+dend1 <- as.dendrogram(hc)
+plot(dend1) ## This is messy
+```
+
+```{r}
+dend2 <- cut(dend1, h = 0.65) ## Cut the dendrogram
+plot(dend2$upper)  ## Plot the cut tree
+```
+
+```{r}
+hc_cut <- cutree(hc, h = 0.65) ## Apply the same cut to the hc cluster object
+table(hc_cut) ## Cluster frequencies
+colMeans(X[hc_cut == 5,]) ## Interpret 5th cluster
+```
+ 
+**Question #2:** Using code provided above, interpret the 2nd cluster.
+
+```{r}
+colMeans(X[hc_cut == 2,])
+```
+
+**Question #3:** An area of debate in hierarchical clustering is how to determine the number of branches. In the prior example we cut the dendrogram using a pre-specified height. This led to a reasonable number of clusters, but the choice of height was somewhat arbitrary. This question will be graded for completion only, but I’d like you to write a few sentences discussing how you might decide where to cut a dendrogram.
+
+I think using visualization like silhouette plots or elbow plots will help you decide where to cut the dendrogram. After some online research, there doesn't seem to be a definitive answer. It's an exploratory approach. That's why I think it's best to try out a few visualiztions, cut the dendrogram at varying levels, and examine which makes most sense.
+
+### Application #4 - On Your Own
+
+**Question #1**:For this exercise I’d like you to apply a clustering analysis to any data set of choosing. The goal of the exercise is to demonstrate your ability to apply clustering methods and interpret the results, so you are free to choose a relatively simple data set. For your homework submission I’d like you to briefly describe the data and how you to plan to use clustering, create 1-2 visuals showing your clustering results, and provide a couple of sentences interpreting your findings.
+
+```{r}
+# will use the iris dataset
+
+ic <- kmeans(iris[,1:4], center=3, nstart=25) # we know iris data has 3 clusters
+fviz_cluster(ic, data = iris[,1:4])
+
+# here we can see the 2nd cluster is well defined but there is some overlap between clusters 1 and 3. 
+```

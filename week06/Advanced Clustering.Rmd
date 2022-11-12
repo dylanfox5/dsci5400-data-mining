@@ -1,0 +1,64 @@
+---
+title: "Chapter 10 Part 2"
+author: "Sean McMannamy"
+date: "10/1/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(factoextra)
+library(cluster)
+```
+
+## Data Set
+Use the diamonds data set within the ggplot2/tidyverse package and perform k-means, k-mediods, CLARA, BIRCH, CHAMELEON, and DBSCAN clustering. Do not use the price variable in your clustering. Once you have completed each clustering determine the mean and standard deviation of the price for each cluster. You must then determine which technique was the most useful for this situation and why that is.
+
+```{r}
+df <- diamonds
+```
+
+## Determining K
+
+```{r}
+head(df)
+df <- df[,-7]
+df$cut <- as.numeric(df$cut)
+df$color <- as.numeric(df$color)
+df$clarity <- as.numeric(df$clarity)
+
+set.seed(55)
+k.max <- 10
+wss <- sapply(1:k.max,
+              function(k) (kmeans(df, k, nstart=50, iter.max = 15)$tot.withinss))
+plot(1:k.max, wss, xlab="clusters", ylab="wss")
+df <- scale(df)
+```
+
+## K means
+
+```{r}
+k3 <- kmeans(df, centers = 3, nstart = 25)
+fviz_cluster(k3, data = df)
+```
+
+## K Medoids
+
+```{r}
+kmed <- pam(df, k = 3)
+fviz_cluster(kmed, data = df)
+```
+
+## CLARA
+
+```{r}
+clara(df, 3, metric = "euclidean", stand = FALSE, 
+      samples = 5, pamLike = FALSE)
+```
+
+## DBSCAN
+
+```{r}
+
+```

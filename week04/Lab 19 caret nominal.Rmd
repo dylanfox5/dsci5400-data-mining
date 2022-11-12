@@ -1,0 +1,395 @@
+---
+title: "Lab 19 Model Building with caret (Nominal Outcomes)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Introduction
+
+The previous lab introduced logistic regression (and it’s regularized and GAM counterparts) as a model for binary categorical outcomes, as well as how to measure the performance of these models. To recap, these performance measures are:
+
+•	Accuracy: The proportion of observations the model correctly classifies
+
+•	Kappa: A variation of accuracy that is corrected for category imbalances
+
+•	Sensitivity: The proportion of “positive” cases that are correctly classified (true positives)
+
+•	Specificity: The proportion of “negative” cases that are correctly classified (true negatives)
+
+•	AUC: A summary of sensitivity and specificity given by the area under the ROC curve (a curve depicting the tradeoff between sensitivity vs. specificity)
+
+In this lab we will introduce methods for modeling nominal categorical and explore how the performance measures mentioned above can be applied to these models.
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+library(nnet)
+library(pROC)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+# 2. Multinomial Logistic Regression
+
+To introduce multinomial logistic regression, an extension of binary logistic regression, we’ll use the famous iris dataset. This dataset contains measurements on 3 different types of iris flowers. A numeric summary of these data can be found below:
+```{r}
+data("iris")
+summary(iris)
+```
+
+Binary logistic regression modeled the log-odds of a “positive” outcome occurring (relative to that outcome not occurring). To generalize this idea to an outcome variable with three categories we’ll need to consider at least two different relative comparisons, for example:
+
+$$ Model \#1: \log(\frac{\pi_{versicolor}}{\pi_{setosa}})=\beta_{0,1}+\beta_{1,1}X_1+…+\beta_{p,1}X_p$$ 
+
+$$ Model \#2: \log(\frac{\pi_{virginica}}{\pi_{setosa}})=\beta_{0,2}+\beta_{1,2}X_1+…+\beta_{p,2}X_p$$
+
+In general, $k−1$ different relative risks are necessary to fully characterize a nominal categorical variable with kk categories. Notice how we could mathematically manipulate these equations (by subtracting them) to get a model comparing involving probability of “versicolor” relative to “virginica” (something shown later).
+
+Other than the added complexity of having to deal with k−1 sets of regression coefficients, multinomial regression can be used in essentially the same ways as binary logistic regression.
+
+Below we use the multinom function in the nnet package to fit a multinomial logistic regression model to the iris data (note that multinomial regression models are related to neural networks):
+```{r}
+mfit <- multinom(Species ~  Sepal.Length , data = iris)
+```
+```{r}
+coef(mfit)
+```
+
+Notice how two separate sets of coefficients are returned. By default, the first level of the categorical outcome variable (in this case Species) will be used a reference category (the denominator in the $k−1$ different relative risks that are modeled). We can interpret the effects of these coefficients after exponentiation:
+```{r}
+## Take the exponent of the coefficients for "Sepal.Length"
+exp(coef(mfit)[,2])
+```
+
+We see that a one-unit increase in Sepal.Length leads to an enormous increase in the likelihood of an iris being versicolor or virginica (relative to setosa). This finding is not particularly suprising given the distribution of Sepal.Length:
+
+```{r}
+ggplot(iris, aes(x = Species, y = Sepal.Length)) + geom_boxplot()
+```
+ 
+A more interesting comparison might involve versicolor and virginica flowers. Notice:
+$$\log(\frac{\pi_{versicolor}}{\pi_{setosa}})−\log(\frac{\pi_{virginica}}{\pi_{setosa}})=\log(\frac{\pi_{versicolor}}{\pi_{setosa}}/\frac{\pi_{virginica}}{\pi_{setosa}}) =\log(\frac{\pi_{versicolor}}{\pi_{virginica}})$$
+Thus we can estimate the effect of Sepal.Length on the probability of an iris being versicolor (relative to virginica) by subtracting the coefficients from the previous model:
+```{r}
+diff <- coef(mfit)[1,2] - coef(mfit)[2,2]  ## Coefficient
+exp(diff) ## Effect on the RR scale
+```
+
+
+
+So each 1 unit increase in Sepal.Length decreases the relative probability of an iris being versicolor by a 87%. Put differently, the relative risk decreases by a factor of 7.6 (1/.131) for each 1 unit increase in Sepal.Length.
+
+**Question #1:**
+
+Using the iris dataset, fit a multinomial logistic regression model using Sepal.Width to predict Species. Interpret the effect of Sepal.Width for the following comparisons: versicolor relative to setosa, virginica relative to setosa, virginica relative to versicolor (notice this last comparison differs slightly from the one shown in our example).
+
+```{r}
+fit <- multinom(Species ~  Sepal.Width , data = iris)
+coef(fit)
+
+exp(coef(fit)[1,2]) ## versicolor to setosa
+exp(coef(fit)[2,2]) ## virginica to setosa
+exp(coef(fit)[2,2] - coef(fit)[1,2]) ## virginica to versicolor
+```
+
+# 4. Measuring Model Performance
+
+Many of the performance measures used for binary categorical outcomes can also be used for nominal categorical outcomes, though some additional nuances are required. In this section we will revisit each of these measures and see how it extends to nominal categorical outcomes.
+
+## Accuracy
+
+Recall that accuracy is proportion of correct classifications the model makes: **Accuracy**$=\sum_{i=1}^n(y_i=\hat{y_i})/n$; unsurprisingly this measure is easily adapted to nominal outcomes, though we still require decision rule to map the predicted probabilities from the model to a predicted category.
+
+In most circumstances, predicted probabilities are mapped to the “most likely” category. Suppose our outcome variable has k categories, we can express this decision rule mathematically:
+
+$$\hat{y_i}=cat_1\hspace{.1in}if\hspace{.1in}\hat{\pi}_{i,k= 1}\geq\hat{\pi}_{i,k\neq 1}$$
+$$\hat{y_i}=cat_2\hspace{.1in}if\hspace{.1in}\hat{\pi}_{i,k= 2}\geq\hat{\pi}_{i,k\neq 2}$$
+$$...$$
+
+The code below demonstrates how this can be done using the matrix of predicted probabilities stored as fitted.values in the fitted model from multinom.
+```{r}
+
+most_likely <- apply(mfit$fitted.values, 1, which.max) ## Applies the which.max function to each row of the matrix of predicted probabilities
+
+pred_cats <- levels(iris$Species)[most_likely]  ## Map the maximums (either 1, 2, or 3) to category labels
+
+sum(pred_cats == iris$Species)/nrow(iris) ## Calculate the fraction of correct predictions (ie: accuracy)
+```
+
+We can see that our multinomial logistic regression model that uses Sepal.Length as a predictor achieves approximately 75% accuracy.
+
+## Kappa
+
+Cohen’s kappa is considerably more complex to calculate. Since its basic interpretation remains the same, we won’t dive into these details, though if you are curious this document (https://psych.unl.edu/psycrs/handcomp/hckappa.PDF) explains the idea pretty clearly.
+
+You should view kappa as a measure of how this model’s classifications compare to what might be expected by random chance. We will rely on the functions in the caret package to calculate kappa for us when dealing with nominal categorical outcomes.
+
+## ROC (sensitivity and specificity)
+
+ROC analysis was designed for situations involving binary variables, nevertheless there are several proposed extensions to nominal outcomes. The multiclass.roc provides one way of calculating the AUC(a summary of sensitivity and specificity) of a model:
+```{r}
+multiclass.roc(iris$Species, mfit$fitted.values)
+```
+
+We will avoid discussing sensitivity and specificity as they only make sense for binary comparisons. If these measures of interest in your application, you should consider reframing your data to contain a binary outcome (either by filtering or consolidating categories).
+
+# 4. Cross-validation via caret
+
+Cross-validating models with nominal categorical outcomes using caret is no different than cross-validating a model with a binary outcome (with the expectation that the “twoClassSummary” option is no longer valid). Recall that there are two key steps in this process:
+
+1.	Setting up the training control options via the trainControl function. In the example below we use this function to specify that we’d like repeated cross-validation (more specifically 10 repeats of 5-fold cross-validation).
+
+2.	Fitting and evaluating our specified model using the train function. In the example we use the argument method = "multinom" to fit a multinomial logistic regression model to the iris dataset.
+```{r}
+fit.control <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+
+set.seed(123)  
+fit <- train(Species ~ Sepal.Length, data = iris, method = "multinom", trControl = fit.control, trace = FALSE)
+
+fit
+```
+
+```{r}
+confusionMatrix(fit)
+```
+
+In this example you should notice:
+
+•	The argument trace = FALSE is used to suppress superfluous output (try running train without it), but this argument doesn’t exist for some methods.
+
+•	The method = "multinom" fits penalized (regularized) multinomial regression models, this ties into the relationship between multinomial regression and neural networks and isn’t something we will concern ourselves with. The value decay = 0 corresponds with the multinomial logistic regression model that we’ve been working with throughout this lab.
+
+•	Out-of-sample accuracy is slightly worse than in-sample accuracy (recall we had calculated 75% accuracy for this model)
+
+•	The confusionMatrix function displays a more detailed summary of the model’s classification accuracy, this can be used to inform situations where the model works better/worse.
+
+**Question #2:**
+
+Use the resamples function to compare the accuracy of the model specified above (ie: Species ~ Sepal.Length) with a model that uses all four available predictors. Which model you do believe does a better job predicting Species?
+
+The model using all variables to predict Species does better because it has a higher average accuracy.
+
+```{r}
+fit.control <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+
+set.seed(123)  
+fit <- train(Species ~ ., data = iris, method = "multinom", trControl = fit.control, trace = FALSE)
+
+fit
+
+confusionMatrix(fit)
+```
+
+# 5. Classification and Regression Trees
+
+Multinomial logistic regression is arguably the most interpretable model for nominal categorical outcomes; however, as you might have felt during this lab, it is still a pretty difficult model to make sense of. For that reason, we’ll now introduce a very different type of model: classification and regression trees (sometimes abbreviated CART for short).
+
+Trees are “trained” by recursively partitioning the p-dimensional space (defined by the explanatory variables) until an acceptable level of separation or “purity” is achieved within each partition.
+
+This idea is best illustrated by looking at an actual tree. The code below uses the rpart function in the rpart package to fit a classification tree on the iris data using the variables Sepal.Length and Sepal.Width as predictors.
+```{r}
+mytree <- rpart(Species ~ Sepal.Length + Sepal.Width, data = iris)
+prp(mytree, extra=104) ## "extra = 104" adds some info to the tree, use ?prp to see the details
+ 
+```
+
+To understand this tree we’ll begin by deciphering the information in the first “node” (shown at the top of the tree).
+
+•	The first line in the box describing the first node indicates the most common class in this node is “setosa”
+
+•	The next line indicates that the node contains 33% setosa, 33% versicolor, and 33% virginica flowers
+
+•	The third line indicates that 100% of the data-points are contained within this node.
+The core concept behind trees is that nodes are split to achieve better “purity”. In this tree, the first node was split using the decision rule “Sepal.Length < 5.5”, flowers that satisfy this condition are sent to “branch” on the left, and flowers that don’t satisfy this condition are sent to the branch on the right.
+
+We can see how this split partitions the data into visually:
+```{r}
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species, pch = Species)) + geom_point() + geom_vline(xintercept = 5.5, lty = 2, lwd = 1.5)
+```
+
+All data-points to the left of the dashed line sent to the left branch, and all data-points to right are sent to the right branch. Using the information in the tree, we see that the right branch contains 35% of the data-points and is 87% setosa flowers. The left branch contains 65% of the data is pretty evenly split between virginica and versicolor flowers.
+
+Next the nodes in the left and right branch are each split again. The node in the left branch is split using decision rule “Sepal.Width ≥≥ 2.8”, while the node in the right branch is split using to the decision rule “Sepal.Length < 6.2”; these splits are shown visually in the plot below:
+```{r}
+
+p1 <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species, pch = Species)) + geom_point() + geom_vline(xintercept = 5.5, lty = 2, lwd = 1.5) + geom_segment(aes(x = min(iris$Sepal.Length-1), y = 2.8, xend = 5.5, yend = 2.8), lwd = 1.5, lty  =2, color = "black") + labs(title = "Splitting the left node") + theme(legend.position = "none")
+
+p2 <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species, pch = Species)) + geom_point() + geom_vline(xintercept = 5.5, lty = 2, lwd = 1.5) + geom_segment(aes(x = min(iris$Sepal.Length-1), y = 2.8, xend = 5.5, yend = 2.8), lwd = 1.5, lty  =2, color = "black") + geom_segment(aes(x = 6.2, y = 1.98, xend = 6.2, yend = 4.45), lwd = 1.5, lty  =2, color = "black")+ labs(title = "Splitting the left and right nodes") + theme(legend.position = "none")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+As you can see in the above plot, the classification tree algorithm recursively partitions the two-dimensional space (defined by Sepal.Width and Sepal.Length) in order to optimally separate the three categories of iris. At this point we’ve described the first 4 nodes, 2 on the left branch and 2 on the right branch. The final tree includes one additional split (the third of these nodes is split using “Sepal.Width ≥≥ 3.1”), a visual representation of this tree is shown below:
+```{r}
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species, pch = Species)) + geom_point() + geom_vline(xintercept = 5.5, lty = 2, lwd = 1.5) + geom_segment(aes(x = min(iris$Sepal.Length-1), y = 2.8, xend = 5.5, yend = 2.8), lwd = 1.5, lty  =2, color = "black") + geom_segment(aes(x = 6.2, y = 1.98, xend = 6.2, yend = 4.45), lwd = 1.5, lty  =2, color = "black") + geom_segment(aes(x = 5.5, y = 3.1, xend = 6.2, yend = 3.1), lwd = 1.5, lty  =2, color = "black") +
+  labs(title = "The Final Classification Tree Model") + theme(legend.position = "none")
+
+```
+
+**Question #3:**
+
+Fit a classification and regression tree to the iris dataset that uses all four predictor variables. Use the prp function the rpart.plot package to plot the tree (include the argument extra = 104). After plotting your tree, briefly describe the 2 splits it makes, then state what percentage of the dataset would be mis-classified if each data-point were predicted to be the dominant species in the node it is contained in.
+
+```{r}
+mytree <- rpart(Species ~ ., data = iris)
+prp(mytree, extra=104)
+```
+
+**Remark:** You should recognize that regression trees can also be applied to numeric outcome variables.
+
+## Pruning
+
+The CART algorithm will consider splitting any (or all) of these nodes until a stopping criterion is reached. We will not go in-depth into possible stopping rules, but they generally depend upon one or more the following factors:
+
+•	Purity of a node
+
+•	Data-points in a node
+
+•	Depth of the tree (how many splits occurred)
+
+Had we desired a tree of a particular depth, we could “prune” our tree by tuning the complexity parameter cp, an internal parameter used to determine when the recursive partitioning algorithm should stop:
+```{r}
+mytree <- rpart(Species ~ Sepal.Length + Sepal.Width, data = iris)
+newtree <- prune(mytree, cp = .1)
+prp(newtree, type = 1, extra=104)
+```
+ 
+## Cross-Validation
+
+Proper stopping rules and pruning is essential when using trees to make generalizable predictions due to their tendency towards over-fitting. Fortunately, cross-validation provides us a tool for appropriate pruning a tree in order to maximize it’s out-of-sample predictive ability.
+
+The code below uses the caret package to compare the predictive ability of trees and multinomial logistic regression:
+```{r}
+fit.control <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+
+set.seed(123)  
+fit1 <- train(Species ~ ., data = iris, method = "multinom", trControl = fit.control, trace = FALSE)
+
+set.seed(123)  
+fit2 <- train(Species ~ ., data = iris, method = "rpart", trControl = fit.control)
+
+
+rs <- resamples(list(mlr = fit1, tree = fit2))
+summary(rs)
+```
+
+Notice how multinomial logistic regression outperforms classification trees on this dataset. The reason for this is due to the tendency of trees to overfit the data. In the next section we’ll briefly introduce a “black box” model known as random forests that addresses this issue
+
+# 6. Random Forests
+
+The major issue with trees is they tend to have high variance (high propensity towards over-fitting). The theory behind random forests rely upon the fundamental premise that averaging a set of independent elements results in lower variability than any of the individual elements itself had.
+
+This should seem vaguely familiar, thinking back to your intro stat course you might remember that the sample mean $\overline{x}$ has less variability $(\sigma/\sqrt{n})$ than the individual data-points themselves have $(\sigma)$. To make use of this fact, we need to introduce a procedure called **bagging** (which is short for bootstrap aggregation).
+
+The goal of bagging is to produce $B$ separate training datasets that are independent of each other. The model of interest (in this case classification and regression trees) is trained on each of these datasets, resulting in $B$ estimates of $f(X)$. These estimates are then averaged to produce a single, low-variance estimate. Bagging is a general approach, but its most well-known application is in random forests.
+
+The random forest algorithm:
+
+1.	Construct $B$ bootstrap samples from the original dataset
+
+2.	Fit a classification and regression tree to each sample, but at each potential split only a sample set of m predictors are eligible to split on
+
+3.	For a given data-point $x_i$, each of the $B$ trees in the forest contributes a prediction or “vote”, with the majority (or average) of these votes being the random forest’s prediction, $\hat{y_i}$
+
+**Remark:** Bootstrapping isn’t enough to decorrelate the $B$ classification and regression trees. By mandating each split only considers a random set of mm predictors the strongest explanatory variables are prevented from dominating every tree (at the expense of other variables that might still provide moderate predictive value), thereby resulting in trees that roughly independent.
+
+The argument method = "rf" is used to train a random forest model using caret:
+```{r}
+fit.control <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+
+set.seed(123)  
+fit1 <- train(Species ~ ., data = iris, method = "multinom", trControl = fit.control, trace = FALSE)
+
+set.seed(123)  
+fit2 <- train(Species ~ ., data = iris, method = "rpart", trControl = fit.control)
+
+set.seed(123)  
+fit3 <- train(Species ~ ., data = iris, method = "rf", trControl = fit.control)
+
+rs <- resamples(list(mlr = fit1, tree = fit2, rf = fit3))
+summary(rs)
+```
+
+Here we see that the random forest method performs better than a single classification and regression tree (and about the same as the multinomial logistic regression model).
+
+**Question 4:**
+
+Print the final random forest model (which is stored in fit3$finalModel in the code chunk above). What are the values B and m used by this model?
+
+```{r}
+fit3$finalModel ## B=500 m=4
+```
+
+# 7. Practice
+
+The wine dataset stored in the UC-Irvine machine learning data repository. This dataset contains wine samples from three different growers in the same region of Italy. The goal of this analysis will be to correctly identify which wines came from which growers.
+
+The code below reads these data:
+```{r}
+wine <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data", sep=",")
+colnames(wine) <- c("GrowerID" ,"Alcohol", "MalicAcid", "Ash", "Alkalinity", "Mg", "TotalPhenols", "Flavanoids", "NonFlavanoidPhenols", "Proanthocyanins", "ColorIntensity", "Hue", "OD280-OD315Ratio", "Proline")
+wine$GrowerID <- factor(wine$GrowerID)
+colnames(wine) <- make.names(colnames(wine))
+```
+
+**Question 5:**
+
+Fit a multinomial logistic regression model using Alcohol to predict GrowerID. Interpret the effect of Alcohol for the following comparisons of growers: Grower 1 relative to Grower 2, Grower 2 relative to Grower 3, Grower 1 relative to Grower 3. (Hint: make sure you are not treating GrowerID as a numeric variableS)
+
+```{r}
+fit <- multinom(GrowerID ~  Alcohol, data = wine)
+coef(fit)
+
+exp(coef(fit)[1,2]) ## 1 to 2
+exp(coef(fit)[2,2]) ## 1 to 3
+exp(coef(fit)[1,2] - coef(fit)[2,2]) ## 2 to 3
+```
+
+**Question 6:**
+
+Use the rpart function to fit a classification tree to the wine data to predict Grower ID using all other variables as predictors. Then use the prp function to visualize your tree, and answer the following:
+
+```{r}
+mytree <- rpart(GrowerID ~ ., data=wine)
+prp(mytree, extra=104)
+```
+
+**A:** What is the first split made by this tree? How many wines were separated into the left and right branches?
+
+The first split made by the tree is whether the data point has greater than or equal to 755 Proline. 37% of the wine was split to the left and the rest to the right.
+
+**B:** Explain the information in the bottom right node of this tree (ie: what do the three rows tell you?)
+
+The bottom right node splits data points based on if the Hue value is greater than or equal to 0.9.
+
+**Question 7:**
+
+Use the caret package to compare the out-of-sample performance of classification tree and multinomial models. Use all available predictors for both models.
+
+```{r}
+set.seed(500)
+rows <- sample(nrow(wine))
+wine <- wine[rows, ]
+split <- round(nrow(wine) * 0.8)
+train <- wine[1:split, ]
+test <- wine[(split + 1):nrow(wine), ]
+
+tree <- rpart(GrowerID ~ ., data=train)
+mn <- multinom(GrowerID ~ ., data=train)
+
+predict(tree, test)
+predict(mn, test)
+```
+
+**Question 8:**
+
+Use the caret package to determine the out-of-sample performance of a random forest model. How does this performance compare to the models you trained in Question 7? Why do you think the performance of this model is much better than the models from Question 7?
+
+```{r}
+rf <- train(GrowerID ~ ., data=train, method = "rf", trControl = fit.control)
+predict(rf, test)
+```
+
+The Random Forest model does better because we are working with subsets of the data. With these independent subsets, we can find a low average of variance and product an accurate result.
